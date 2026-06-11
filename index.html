@@ -558,114 +558,131 @@ function isoOf(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.ge
 function recentWeeks(n){
   var mon = weekRangeNow()[0];
   var out = [];
-  for(var i=0;i<n;i++){
-    var m = new Date(mon); m.setDate(mon.getDate()-7*i);
-    out.push(isoOf(m));
-  }
+  for(var i=0;i<n;i++){ var m=new Date(mon); m.setDate(mon.getDate()-7*i); out.push(isoOf(m)); }
   return out;
 }
 function weekLabelOf(mondayIso){
   var mon = parseD(mondayIso); var sun = new Date(mon); sun.setDate(mon.getDate()+6);
   return (mon.getMonth()+1)+'/'+mon.getDate()+'〜'+(sun.getMonth()+1)+'/'+sun.getDate();
 }
+function weekRangeOf(weekIso){
+  var mon = parseD(weekIso); mon.setHours(0,0,0,0);
+  var sun = new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+  return [mon, sun];
+}
 function weekActualRange(pj, mon, sun){
   var sum=[0,0,0,0];
-  pj.days.forEach(function(d){
-    var dt=parseD(d.date);
-    if(dt && dt>=mon && dt<=sun){ for(var i=0;i<4;i++){ sum[i]+=Number(d.actual[i])||0; } }
-  });
+  pj.days.forEach(function(d){ var dt=parseD(d.date); if(dt&&dt>=mon&&dt<=sun){ for(var i=0;i<4;i++){ sum[i]+=Number(d.actual[i])||0; } } });
   return sum;
 }
 function weekTextsRange(pj, mon, sun){
   var js=[], na=[];
-  pj.days.forEach(function(d){
-    var dt=parseD(d.date);
-    if(dt && dt>=mon && dt<=sun){
-      if(d.jisshi && d.jisshi.trim()){ js.push(d.jisshi.trim()); }
-      if(d.na && d.na.trim()){ na.push(d.na.trim()); }
-    }
-  });
+  pj.days.forEach(function(d){ var dt=parseD(d.date); if(dt&&dt>=mon&&dt<=sun){ if(d.jisshi&&d.jisshi.trim()){js.push(d.jisshi.trim());} if(d.na&&d.na.trim()){na.push(d.na.trim());} } });
   return { jisshi: js, na: na };
 }
-function buildWeekContext(weekIso){
-  var mon = parseD(weekIso); mon.setHours(0,0,0,0);
-  var sun = new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+function pjWeekTargets(pj, ymRef){
+  var mt = pjTarget(pj, ymRef); var wt=[];
+  for(var i=0;i<4;i++){ wt.push(Math.round(weekTarget(mt[i], ymRef))); }
+  return wt;
+}
+function reviewKey(weekIso, type, id){ return weekIso+'__'+type+'__'+id; }
+
+function buildScopeContext(weekIso, type, id){
+  var r = weekRangeOf(weekIso); var mon=r[0], sun=r[1];
   var ymRef = ymOf(weekIso);
-  var totT=[0,0,0,0], totA=[0,0,0,0];
-  var projects = [];
-  state.divisions.forEach(function(div){
-    activeProjects(div).forEach(function(pj){
-      var a = weekActualRange(pj, mon, sun);
-      var mt = pjTarget(pj, ymRef);
-      var wt = [];
-      for(var i=0;i<4;i++){ wt.push(Math.round(weekTarget(mt[i], ymRef))); totT[i]+=wt[i]; totA[i]+=a[i]; }
-      var txt = weekTextsRange(pj, mon, sun);
-      if((a[0]+a[1]+a[2]+a[3])>0 || txt.jisshi.length || txt.na.length){
-        projects.push({ division: div.name, name: pj.name, weekTarget: wt, weekActual: a, jisshi: txt.jisshi, na: txt.na });
-      }
+  if(type==='pj'){
+    var pj = findPJ(id); var div = divOfPJ(id);
+    var a = weekActualRange(pj, mon, sun);
+    var wt = pjWeekTargets(pj, ymRef);
+    var txt = weekTextsRange(pj, mon, sun);
+    return { scope:'PJ単体', week: weekLabelOf(weekIso), division: div?div.name:'', name: pj.name, metrics: METRICS, weekTarget: wt, weekActual: a, jisshi: txt.jisshi, na: txt.na };
+  } else {
+    var dv = findDiv(id);
+    var totT=[0,0,0,0], totA=[0,0,0,0]; var projects=[];
+    activeProjects(dv).forEach(function(pj){
+      var a = weekActualRange(pj, mon, sun); var wt = pjWeekTargets(pj, ymRef); var txt = weekTextsRange(pj, mon, sun);
+      for(var i=0;i<4;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; }
+      projects.push({ name: pj.name, weekTarget: wt, weekActual: a, jisshi: txt.jisshi, na: txt.na });
     });
-  });
-  return { week: weekLabelOf(weekIso), metrics: METRICS, totalTarget: totT, totalActual: totA, projects: projects };
+    return { scope:'事業部全体', week: weekLabelOf(weekIso), name: dv.name, metrics: METRICS, totalTarget: totT, totalActual: totA, projects: projects };
+  }
 }
 var _gen = {};
 function callWorker(ctx){
   return auth.currentUser.getIdToken().then(function(token){
-    return fetch(WORKER_URL, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
-      body: JSON.stringify({ context: ctx })
-    });
+    return fetch(WORKER_URL, { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}, body: JSON.stringify({context: ctx}) });
   }).then(function(res){
     if(!res.ok){ return res.text().then(function(t){ throw new Error(res.status+' '+t); }); }
     return res.json();
   });
 }
-function generateReview(weekIso){
-  _gen[weekIso] = true; renderReview();
-  var ctx = buildWeekContext(weekIso);
+function generateReview(weekIso, type, id){
+  var key = reviewKey(weekIso, type, id);
+  _gen[key] = true; renderReview();
+  var ctx = buildScopeContext(weekIso, type, id);
   callWorker(ctx).then(function(r){
-    state.reviews[weekIso] = {
-      did: r.did||[], achieved: r.achieved||[], concerns: r.concerns||[],
-      by: (auth.currentUser && auth.currentUser.email) || '', at: Date.now()
-    };
-    _gen[weekIso] = false;
-    save(); renderReview();
+    state.reviews[key] = { did:r.did||[], achieved:r.achieved||[], concerns:r.concerns||[], by:(auth.currentUser&&auth.currentUser.email)||'', at:Date.now() };
+    _gen[key]=false; save(); renderReview();
   }).catch(function(e){
-    _gen[weekIso] = false; renderReview();
+    _gen[key]=false; renderReview();
     alert('総評の生成に失敗しました。\n'+e.message+'\n（Worker URL・APIキー・ログインを確認してください）');
   });
 }
+function sumLine(target, actual){
+  var html='<div class="revsum">';
+  for(var i=0;i<4;i++){ var p=pct(actual[i],target[i]); html+='<span>'+SHORT[i]+' <b>'+actual[i]+'</b> / '+target[i]+'（'+p+'%）</span>'; }
+  return html+'</div>';
+}
+function reviewBlock(weekIso, type, id){
+  var key = reviewKey(weekIso, type, id);
+  var rev = state.reviews[key];
+  var loading = !!_gen[key];
+  var html = '';
+  if(rev){
+    html += '<div class="revsec"><div class="h">実施したこと</div><ul>'+(rev.did||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
+    html += '<div class="revsec"><div class="h">成果・できたこと</div><ul>'+(rev.achieved||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
+    html += '<div class="revsec"><div class="h">懸念点</div><ul>'+(rev.concerns||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
+  }
+  html += '<div style="margin-top:8px">';
+  if(loading){ html += '<button class="btn sm" disabled>生成中…</button>'; }
+  else { html += '<button class="btn dark sm" onclick="generateReview(\''+weekIso+'\',\''+type+'\',\''+id+'\')">✨ '+(rev?'再生成':'総評を生成')+'</button>'; }
+  html += '</div>';
+  return html;
+}
+function setReviewWeek(iso){ state.ui.reviewWeek = iso; renderReview(); }
 function renderReview(){
   var weeks = recentWeeks(8);
-  var thisWeek = isoOf(weekRangeNow()[0]);
+  if(!state.ui.reviewWeek || weeks.indexOf(state.ui.reviewWeek)<0){ state.ui.reviewWeek = weeks[0]; }
+  var wk = state.ui.reviewWeek;
+  var r = weekRangeOf(wk); var mon=r[0], sun=r[1]; var ymRef = ymOf(wk);
   var html = '';
-  weeks.forEach(function(wk){
-    var ctx = buildWeekContext(wk);
-    var rev = state.reviews[wk];
-    var loading = !!_gen[wk];
-    html += '<div class="card rev">';
-    html += '<div class="divhead"><span class="nm">'+weekLabelOf(wk)+'</span>';
-    if(wk===thisWeek){ html += '<span class="sub">今週</span>'; }
-    html += '</div>';
-    html += '<div class="revsum">';
-    for(var i=0;i<4;i++){
-      var p = pct(ctx.totalActual[i], ctx.totalTarget[i]);
-      html += '<span>'+SHORT[i]+' <b>'+ctx.totalActual[i]+'</b> / '+ctx.totalTarget[i]+'（'+p+'%）</span>';
-    }
-    html += '</div>';
-    if(rev){
-      html += '<div class="revsec"><div class="h">実施したこと</div><ul>'+(rev.did||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
-      html += '<div class="revsec"><div class="h">成果・できたこと</div><ul>'+(rev.achieved||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
-      html += '<div class="revsec"><div class="h">懸念点</div><ul>'+(rev.concerns||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>';
-      if(rev.by){ html += '<div class="sub" style="margin-top:8px">生成: '+esc(rev.by)+'</div>'; }
-    } else {
-      html += '<div class="sub" style="margin:6px 0">まだ総評がありません。</div>';
-    }
-    html += '<div style="margin-top:10px">';
-    if(loading){ html += '<button class="btn" disabled>生成中…</button>'; }
-    else { html += '<button class="btn dark" onclick="generateReview(\''+wk+'\')">✨ '+(rev?'再生成':'総評を生成')+'</button>'; }
-    html += '</div></div>';
+  html += '<div class="chips" style="margin-bottom:18px">';
+  weeks.forEach(function(w){
+    html += '<span class="chip'+(w===wk?' on':'')+'" onclick="setReviewWeek(\''+w+'\')">'+weekLabelOf(w)+(w===weeks[0]?'（今週）':'')+'</span>';
   });
+  html += '</div>';
+  var any=false;
+  state.divisions.forEach(function(div){
+    var aps = activeProjects(div);
+    if(aps.length===0){ return; }
+    any=true;
+    var totT=[0,0,0,0], totA=[0,0,0,0];
+    aps.forEach(function(pj){ var a=weekActualRange(pj,mon,sun); var wt=pjWeekTargets(pj,ymRef); for(var i=0;i<4;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; } });
+    html += '<div class="card" style="box-shadow:inset 3px 0 0 0 '+div.color+'">';
+    html += '<div class="divhead">'+swatch(div.color)+'<span class="nm">'+esc(div.name)+'</span><span class="sub">事業部の総評（運用中PJ合算）</span></div>';
+    html += sumLine(totT, totA);
+    html += reviewBlock(wk, 'div', div.id);
+    aps.forEach(function(pj){
+      var a=weekActualRange(pj,mon,sun); var wt=pjWeekTargets(pj,ymRef);
+      html += '<div class="pjbox" style="box-shadow:inset 3px 0 0 0 '+pj.color+'; margin-top:14px">';
+      html += '<div class="pjhead">'+swatch(pj.color)+'<span class="nm">'+esc(pj.name)+'</span><span class="sub">PJの総評</span></div>';
+      html += sumLine(wt, a);
+      html += reviewBlock(wk, 'pj', pj.id);
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  if(!any){ html += '<div class="empty">運用中のPJがありません。日次入力でデータを追加してください。</div>'; }
   $('root').innerHTML = html;
 }
 
