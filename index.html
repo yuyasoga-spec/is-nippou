@@ -111,6 +111,19 @@ input.num-in{width:62px; text-align:right}
 .revsec li{font-size:13px; margin:2px 0}
 .revsum{display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin:4px 0 8px}
 .revsum b{color:var(--ink); font-variant-numeric:tabular-nums}
+.csvbar{margin:2px 0 18px}
+.csvpanel{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:10px}
+.csvpanel label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.csvpanel select{font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+.csvhint{font-size:11.5px;color:var(--faint);margin-top:8px;line-height:1.7}
+.imaster{margin-bottom:14px}
+.imbody{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:8px;max-width:440px}
+.imrow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.imrow .inp{flex:1}
+.ismall{font-size:12px;padding:5px 6px;min-width:96px}
+.dtwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
@@ -166,6 +179,22 @@ var docRef = db.collection('encareer').doc('state');
 // ===== 定数 =====
 var METRICS = ['ADアポ数','AD参加数','面談アポ数','面談参加数'];
 var SHORT = ['ADアポ','AD参加','面談アポ','面談参加'];
+var ALLM = [
+  {label:'ADアポ数', short:'ADアポ'},
+  {label:'AD参加数', short:'AD参加'},
+  {label:'面談アポ数', short:'面談アポ'},
+  {label:'面談参加数', short:'面談参加'},
+  {label:'面談参加予定者数', short:'面談参加予定'},
+  {label:'前日応募者数', short:'前日応募'}
+];
+var NM = ALLM.length;
+var BIZ = { ad:{label:'AD事業',metrics:[0,1,2,3,5],targets:[0,1,2,3,5]}, school:{label:'スクール事業',metrics:[2,3,4,5],targets:[2,3]} };
+function bizOf(div){ return BIZ[(div&&div.bizType)||'ad'] || BIZ.ad; }
+function metricsOf(div){ return bizOf(div).metrics; }
+function targetsOf(div){ return bizOf(div).targets; }
+function hasTarget(div, mi){ return targetsOf(div).indexOf(mi)>=0; }
+function zeros(){ var a=[]; for(var i=0;i<NM;i++){ a.push(0); } return a; }
+function padArr(a){ a=(a||[]).slice(); while(a.length<NM){ a.push(0); } return a; }
 var MCOL = ['var(--m0)','var(--m1)','var(--m2)','var(--m3)'];
 var COLORS = ['#c0843c','#3f7d5a','#4f7cb3','#9a5e1f','#b85c4a','#7a6aa8','#3f8f8f','#a85c8a','#6f8f3a','#c2604a'];
 function pickColor(n){ return COLORS[((n%COLORS.length)+COLORS.length)%COLORS.length]; }
@@ -232,24 +261,26 @@ function elapsedDays(ym){
 // ===== 集計 =====
 function pjTarget(pj, ym){
   var t = pj.monthlyTargets[ym];
-  return t ? t.slice() : [0,0,0,0];
+  return t ? padArr(t) : zeros();
 }
 function pjMonthActual(pj, ym){
-  var sum = [0,0,0,0];
+  var sum = zeros();
   pj.days.forEach(function(d){
     if(ymOf(d.date) === ym){
-      for(var i=0;i<4;i++){ sum[i] += Number(d.actual[i])||0; }
+      var act = padArr(d.actual);
+      for(var i=0;i<NM;i++){ sum[i] += Number(act[i])||0; }
     }
   });
   return sum;
 }
 function pjWeekActual(pj){
   var wr = weekRangeNow();
-  var sum = [0,0,0,0];
+  var sum = zeros();
   pj.days.forEach(function(d){
     var dt = parseD(d.date);
     if(dt && dt >= wr[0] && dt <= wr[1]){
-      for(var i=0;i<4;i++){ sum[i] += Number(d.actual[i])||0; }
+      var act = padArr(d.actual);
+      for(var i=0;i<NM;i++){ sum[i] += Number(act[i])||0; }
     }
   });
   return sum;
@@ -276,12 +307,12 @@ function activeProjects(div){
   return div.projects.filter(function(p){ return p.status === '運用中'; });
 }
 function divRollup(div, ym){
-  var mt=[0,0,0,0], ma=[0,0,0,0], wa=[0,0,0,0];
+  var mt=zeros(), ma=zeros(), wa=zeros();
   activeProjects(div).forEach(function(p){
-    var t = pjTarget(p, ym);
+    var t = padArr(pjTarget(p, ym));
     var a = pjMonthActual(p, ym);
     var w = pjWeekActual(p);
-    for(var i=0;i<4;i++){ mt[i]+=t[i]; ma[i]+=a[i]; wa[i]+=w[i]; }
+    for(var i=0;i<NM;i++){ mt[i]+=t[i]; ma[i]+=a[i]; wa[i]+=w[i]; }
   });
   return {target:mt, actual:ma, week:wa};
 }
@@ -289,61 +320,84 @@ function pct(a, t){ return t>0 ? Math.round(a/t*100) : 0; }
 function barColor(p){ return p>=85 ? 'var(--good)' : (p>=60 ? 'var(--accent)' : 'var(--warn)'); }
 
 // ===== 状態 =====
-var state = { divisions: [], reviews: {}, ui: { view:'dashboard', month: curYM(), search:'', filterId:null, activeOnly:false } };
+var state = { divisions: [], reviews: {}, inputters: [], ui: { view:'dashboard', month: curYM(), search:'', filterId:null, activeOnly:false } };
 
 function seed(){
   var ym = curYM();
-  function day(date, a){ return {id:uid(), date:date, actual:a, jisshi:'', na:'', noteOpen:false}; }
+  function day(date, a){ return {id:uid(), date:date, actual:a, jisshi:'', na:'', noteOpen:false, by:''}; }
   var p = ym.split('-'); var yy=p[0], mm=p[1];
   function d(n){ return yy+'-'+mm+'-'+pad2(n); }
   return {
-    divisions: [{
-      id: uid(), name: 'IS事業部', color: '#4f7cb3', open: true,
-      projects: [
-        { id: uid(), name: 'Star Creation Next', color: '#c0843c', status: '運用中', open: true,
-          monthlyTargets: makeT(ym, [80,64,48,32]),
-          days: [ day(d(1),[3,2,2,1]), day(d(2),[3,3,1,1]), day(d(3),[2,2,2,2]),
-                  day(d(4),[3,2,1,1]), day(d(5),[2,2,2,1]), day(d(8),[3,2,1,1]),
-                  day(d(9),[2,2,1,1]), day(d(10),[3,2,2,1]), day(d(11),[2,1,1,1]) ] },
-        { id: uid(), name: 'TGCキャリア', color: '#3f7d5a', status: '運用中', open: true,
-          monthlyTargets: makeT(ym, [60,48,36,24]),
-          days: [ day(d(2),[3,2,1,1]), day(d(3),[2,2,2,1]), day(d(4),[3,3,2,2]),
-                  day(d(5),[2,2,1,1]), day(d(9),[3,2,2,1]), day(d(10),[2,2,1,1]),
-                  day(d(11),[3,2,1,1]) ] },
-        { id: uid(), name: '旧媒体PJ', color: '#9a8f7d', status: '停止中', open: false,
-          monthlyTargets: makeT(ym, [20,12,8,4]), days: [] }
-      ]
-    }],
+    inputters: ['沼田','関','原','村井'].map(function(n){ return {id:uid(), name:n}; }),
+    divisions: [
+      {
+        id: uid(), name: 'IS事業部', color: '#4f7cb3', open: true, bizType:'ad',
+        projects: [
+          { id: uid(), name: 'Star Creation Next', color: '#c0843c', status: '運用中', open: true,
+            monthlyTargets: makeT(ym, [80,64,48,32,0,1650]),
+            days: [ day(d(1),[3,2,2,1,0,80]), day(d(2),[3,3,1,1,0,72]), day(d(3),[2,2,2,2,0,90]),
+                    day(d(4),[3,2,1,1,0,61]), day(d(5),[2,2,2,1,0,55]), day(d(8),[3,2,1,1,0,77]),
+                    day(d(9),[2,2,1,1,0,63]), day(d(10),[3,2,2,1,0,88]), day(d(11),[2,1,1,1,0,89]) ] },
+          { id: uid(), name: 'TGCキャリア', color: '#3f7d5a', status: '運用中', open: true,
+            monthlyTargets: makeT(ym, [60,48,36,24,0,1200]),
+            days: [ day(d(2),[3,2,1,1,0,40]), day(d(3),[2,2,2,1,0,52]), day(d(4),[3,3,2,2,0,45]),
+                    day(d(5),[2,2,1,1,0,33]), day(d(9),[3,2,2,1,0,61]), day(d(10),[2,2,1,1,0,48]),
+                    day(d(11),[3,2,1,1,0,44]) ] },
+          { id: uid(), name: '旧媒体PJ', color: '#9a8f7d', status: '停止中', open: false,
+            monthlyTargets: makeT(ym, [20,12,8,4,0,0]), days: [] }
+        ]
+      },
+      {
+        id: uid(), name: 'スクール事業部', color: '#7a5ea8', open: true, bizType:'school',
+        projects: [
+          { id: uid(), name: 'CLOUD NINE SCHOOL', color: '#b5793f', status: '運用中', open: true,
+            monthlyTargets: makeT(ym, [0,0,88,5,0,0]),
+            days: [ day(d(9),[0,0,2,1,7,12]), day(d(10),[0,0,1,0,9,8]), day(d(11),[0,0,1,0,9,10]) ] }
+        ]
+      }
+    ],
     ui: { view:'dashboard', month: ym, search:'', filterId:null, activeOnly:false }
   };
 }
 function makeT(ym, arr){ var o={}; o[ym]=arr.slice(); return o; }
 
-function migrateColors(){
+function migrate(){
+  if(!state.inputters){ state.inputters = []; }
   state.divisions.forEach(function(d, di){
     if(!d.color){ d.color = pickColor(di); }
-    d.projects.forEach(function(p, pi){ if(!p.color){ p.color = pickColor(di*3+pi+1); } });
+    if(!d.bizType){ d.bizType = 'ad'; }
+    d.projects.forEach(function(p, pi){
+      if(!p.color){ p.color = pickColor(di*3+pi+1); }
+      if(!p.monthlyTargets){ p.monthlyTargets = {}; }
+      Object.keys(p.monthlyTargets).forEach(function(k){ p.monthlyTargets[k] = padArr(p.monthlyTargets[k]); });
+      if(!p.days){ p.days = []; }
+      p.days.forEach(function(dy){ dy.actual = padArr(dy.actual); if(dy.by===undefined){ dy.by=''; } });
+    });
   });
 }
+function migrateColors(){ migrate(); }
 var _lastSync = '';
 function applySnap(snap){
   if(!snap.exists){ initEmpty(); return; }
   var data = snap.data() || {};
   var divisions = data.divisions || [];
   var reviews = data.reviews || {};
-  var js = JSON.stringify({d:divisions, r:reviews});
+  var inputters = data.inputters || [];
+  var js = JSON.stringify({d:divisions, r:reviews, i:inputters});
   if(js === _lastSync) return;
   _lastSync = js;
   state.divisions = divisions;
   state.reviews = reviews;
-  migrateColors();
+  state.inputters = inputters;
+  migrate();
   render();
 }
 function initEmpty(){
   state.divisions = [];
   state.reviews = {};
-  _lastSync = JSON.stringify({d:[], r:{}});
-  docRef.set({ divisions: [], reviews: {} }).catch(function(e){ console.error(e); });
+  state.inputters = [];
+  _lastSync = JSON.stringify({d:[], r:{}, i:[]});
+  docRef.set({ divisions: [], reviews: {}, inputters: [] }).catch(function(e){ console.error(e); });
   render();
 }
 var _subbed = false;
@@ -357,8 +411,8 @@ function save(){
   if(!docRef) return;
   clearTimeout(_saveT);
   _saveT = setTimeout(function(){
-    var payload = { divisions: state.divisions, reviews: state.reviews };
-    _lastSync = JSON.stringify({d:payload.divisions, r:payload.reviews});
+    var payload = { divisions: state.divisions, reviews: state.reviews, inputters: state.inputters };
+    _lastSync = JSON.stringify({d:payload.divisions, r:payload.reviews, i:payload.inputters});
     docRef.set(payload).catch(function(e){ console.error('save', e); });
   }, 400);
 }
@@ -421,14 +475,19 @@ function renderDashboard(){
     html += '<div class="divhead">'+swatch(div.color)+'<span class="nm">'+esc(div.name)+'</span>'+
             '<span class="sub">運用中PJ '+activeCount+'件の合計</span></div>';
     html += '<div class="mgrid">';
-    for(var i=0;i<4;i++){
-      var p = pct(roll.actual[i], roll.target[i]);
-      html += '<div class="mcell"><div class="lab">'+METRICS[i]+'</div>'+
-        '<div class="val"><span class="a num">'+roll.actual[i]+'</span>'+
-        '<span class="t num">/ '+roll.target[i]+'</span>'+
-        '<span class="p num">'+p+'%</span></div>'+
-        '<div class="bar2"><i style="width:'+Math.min(p,100)+'%;background:'+barColor(p)+'"></i></div></div>';
-    }
+    metricsOf(div).forEach(function(i){
+      if(hasTarget(div,i)){
+        var p = pct(roll.actual[i], roll.target[i]);
+        html += '<div class="mcell"><div class="lab">'+ALLM[i].label+'</div>'+
+          '<div class="val"><span class="a num">'+roll.actual[i]+'</span>'+
+          '<span class="t num">/ '+roll.target[i]+'</span>'+
+          '<span class="p num">'+p+'%</span></div>'+
+          '<div class="bar2"><i style="width:'+Math.min(p,100)+'%;background:'+barColor(p)+'"></i></div></div>';
+      } else {
+        html += '<div class="mcell"><div class="lab">'+ALLM[i].label+'</div>'+
+          '<div class="val"><span class="a num">'+roll.actual[i]+'</span></div></div>';
+      }
+    });
     html += '</div>';
 
     pjs.forEach(function(pj){
@@ -442,21 +501,33 @@ function renderDashboard(){
       html += '<span class="tag">#'+esc(pj.name)+'</span></div>';
       html += '<table class="t"><colgroup><col style="width:19%"><col style="width:11%"><col style="width:11%"><col style="width:10%"><col style="width:26%"><col style="width:12%"><col style="width:11%"></colgroup>';
       html += '<tr><th>指標</th><th style="text-align:right">月目標</th><th style="text-align:right">1日目標</th><th style="text-align:right">月実績</th><th>月進捗</th><th style="text-align:right">今週 実/目</th><th>ペース</th></tr>';
-      for(var i=0;i<4;i++){
-        var p = pct(a[i], t[i]);
-        var wt = Math.round(weekTarget(t[i], ym));
-        var pc = paceOf(a[i], t[i], ym);
-        html += '<tr>'+
-          '<td style="color:var(--muted)">'+SHORT[i]+'</td>'+
-          '<td style="text-align:right" class="num">'+t[i]+'</td>'+
-          '<td style="text-align:right;color:var(--muted)" class="num">'+fmt1(dailyTarget(t[i], ym))+'</td>'+
-          '<td style="text-align:right" class="num">'+a[i]+'</td>'+
-          '<td><div class="progwrap"><div class="bar2" style="flex:1"><i style="width:'+Math.min(p,100)+'%;background:'+barColor(p)+'"></i></div>'+
-          '<span class="pct num">'+p+'%</span></div></td>'+
-          '<td style="text-align:right;color:var(--muted)" class="num">'+w[i]+' / '+wt+'</td>'+
-          '<td><span class="pace '+pc.cls+'">'+pc.label+'</span></td>'+
-          '</tr>';
-      }
+      metricsOf(div).forEach(function(i){
+        if(hasTarget(div,i)){
+          var p = pct(a[i], t[i]);
+          var wt = Math.round(weekTarget(t[i], ym));
+          var pc = paceOf(a[i], t[i], ym);
+          html += '<tr>'+
+            '<td style="color:var(--muted)">'+ALLM[i].short+'</td>'+
+            '<td style="text-align:right" class="num">'+t[i]+'</td>'+
+            '<td style="text-align:right;color:var(--muted)" class="num">'+fmt1(dailyTarget(t[i], ym))+'</td>'+
+            '<td style="text-align:right" class="num">'+a[i]+'</td>'+
+            '<td><div class="progwrap"><div class="bar2" style="flex:1"><i style="width:'+Math.min(p,100)+'%;background:'+barColor(p)+'"></i></div>'+
+            '<span class="pct num">'+p+'%</span></div></td>'+
+            '<td style="text-align:right;color:var(--muted)" class="num">'+w[i]+' / '+wt+'</td>'+
+            '<td><span class="pace '+pc.cls+'">'+pc.label+'</span></td>'+
+            '</tr>';
+        } else {
+          html += '<tr>'+
+            '<td style="color:var(--muted)">'+ALLM[i].short+'</td>'+
+            '<td style="text-align:right;color:var(--faint)">—</td>'+
+            '<td style="text-align:right;color:var(--faint)">—</td>'+
+            '<td style="text-align:right" class="num">'+a[i]+'</td>'+
+            '<td style="color:var(--faint)">—</td>'+
+            '<td style="text-align:right;color:var(--muted)" class="num">'+w[i]+'</td>'+
+            '<td><span class="pace na">—</span></td>'+
+            '</tr>';
+        }
+      });
       html += '</table></div>';
     });
     html += '</div>';
@@ -469,6 +540,7 @@ function renderDashboard(){
 function renderInput(){
   var ym = state.ui.month;
   var html = '';
+  html += inputterMasterHtml();
   if(state.divisions.length===0){
     html += '<div class="empty">「＋ 事業部を追加」から始めてください。</div>';
   }
@@ -477,7 +549,11 @@ function renderInput(){
     html += '<div class="divbar" onclick="toggleDiv(\''+div.id+'\')">'+
       '<span class="caret'+(div.open?' open':'')+'">▶</span>'+
       '<input type="color" value="'+div.color+'" title="事業部の色" onclick="event.stopPropagation()" oninput="setDivColor(\''+div.id+'\',this.value)" onchange="render()" style="width:26px;height:26px;padding:0;border:1px solid var(--line2);border-radius:6px;background:none;cursor:pointer">'+
-      '<input class="inp" style="font-family:Shippori Mincho B1,serif;font-size:16px;font-weight:600;min-width:180px" value="'+esc(div.name)+'" onclick="event.stopPropagation()" oninput="renameDiv(\''+div.id+'\',this.value)">'+
+      '<input class="inp" style="font-family:Shippori Mincho B1,serif;font-size:16px;font-weight:600;min-width:150px" value="'+esc(div.name)+'" onclick="event.stopPropagation()" oninput="renameDiv(\''+div.id+'\',this.value)">'+
+      '<select class="inp" onclick="event.stopPropagation()" onchange="setBizType(\''+div.id+'\',this.value)" title="事業タイプ">'+
+        '<option value="ad"'+((div.bizType||'ad')==='ad'?' selected':'')+'>AD事業</option>'+
+        '<option value="school"'+(div.bizType==='school'?' selected':'')+'>スクール事業</option>'+
+      '</select>'+
       '<span class="sub">PJ '+div.projects.length+'件</span>'+
       '<span style="margin-left:auto" onclick="event.stopPropagation()"><button class="btn ghost sm" onclick="removeDiv(\''+div.id+'\')">事業部を削除</button></span>'+
       '</div>';
@@ -496,11 +572,14 @@ function renderInput(){
 }
 
 function renderPJEditor(div, pj, ym){
-  var t = pjTarget(pj, ym);
+  var mlist = metricsOf(div);
+  var tlist = targetsOf(div);
+  var t = padArr(pjTarget(pj, ym));
+  var biz = (div.bizType||'ad');
   var h = '<div class="pjbox" style="box-shadow:inset 4px 0 0 0 '+pj.color+'">';
   h += '<div class="row" style="margin-bottom:8px">'+
     '<input type="color" value="'+pj.color+'" title="PJの色" oninput="setPjColor(\''+pj.id+'\',this.value)" onchange="render()" style="width:26px;height:26px;padding:0;border:1px solid var(--line2);border-radius:6px;background:none;cursor:pointer">'+
-    '<input class="inp" style="font-weight:700;min-width:180px" value="'+esc(pj.name)+'" oninput="renamePJ(\''+pj.id+'\',this.value)">'+
+    '<input class="inp" style="font-weight:700;min-width:150px" value="'+esc(pj.name)+'" oninput="renamePJ(\''+pj.id+'\',this.value)">'+
     '<select class="inp" onchange="setStatus(\''+pj.id+'\',this.value)">'+
       '<option'+(pj.status==='運用中'?' selected':'')+'>運用中</option>'+
       '<option'+(pj.status==='停止中'?' selected':'')+'>停止中</option>'+
@@ -509,46 +588,53 @@ function renderPJEditor(div, pj, ym){
     '</div>';
   h += '<div class="sub" style="margin-top:4px">'+monthLabel(ym)+'の目標</div>';
   h += '<div class="tgtgrid">';
-  for(var i=0;i<4;i++){
-    h += '<div class="tgt"><label>'+SHORT[i]+'</label>'+
+  tlist.forEach(function(i){
+    h += '<div class="tgt"><label>'+ALLM[i].short+'</label>'+
       '<input class="inp num-in" style="width:100%" type="number" min="0" value="'+t[i]+'" oninput="setTarget(\''+pj.id+'\','+i+',this.value)" onchange="renderInput()"></div>';
-  }
+  });
   h += '</div>';
   var dline = [];
-  for(var j=0;j<4;j++){ dline.push(SHORT[j]+' '+fmt1(dailyTarget(t[j], ym))); }
-  h += '<div class="sub" style="margin:0 0 4px">1日あたり目標（自動）：'+dline.join(' ／ ')+'</div>';
-  // 日次入力
-  var dt = [];
-  for(var k=0;k<4;k++){ dt.push(dailyTarget(t[k], ym)); }
-  h += '<table class="daytable"><tr><th style="text-align:left">日付</th>';
-  for(var i=0;i<4;i++){ h += '<th>'+SHORT[i]+'</th>'; }
-  h += '<th>達成率</th><th></th><th></th></tr>';
+  tlist.forEach(function(i){ dline.push(ALLM[i].short+' '+fmt1(dailyTarget(t[i], ym))); });
+  if(dline.length){ h += '<div class="sub" style="margin:0 0 4px">1日あたり目標（自動）：'+dline.join(' ／ ')+'</div>'; }
+  h += '<div class="dtwrap"><table class="daytable"><tr><th style="text-align:left">日付</th>';
+  mlist.forEach(function(i){ h += '<th>'+ALLM[i].short+'</th>'; });
+  h += '<th>達成率</th><th>入力者</th><th></th><th></th><th></th></tr>';
+  var colspan = mlist.length + 6;
   pj.days.slice().sort(function(a,b){ return (a.date<b.date?1:-1); }).forEach(function(dy){
+    var act = padArr(dy.actual);
     h += '<tr><td style="text-align:left"><input class="inp" type="date" value="'+dy.date+'" onchange="setDate(\''+pj.id+'\',\''+dy.id+'\',this.value)"></td>';
     var dps = [];
-    for(var i=0;i<4;i++){
-      var av = Number(dy.actual[i])||0;
-      var dp = dt[i]>0 ? Math.round(av/dt[i]*100) : null;
+    mlist.forEach(function(i){
+      var av = Number(act[i])||0;
+      var tgt = hasTarget(div,i) ? dailyTarget(t[i], ym) : 0;
+      var dp = (hasTarget(div,i) && tgt>0) ? Math.round(av/tgt*100) : null;
       if(dp!==null){ dps.push(dp); }
       var dpc = dp===null ? 'var(--faint)' : (dp>=100?'var(--good)':(dp>=70?'var(--warn)':'var(--bad)'));
-      h += '<td><input class="inp num-in" type="number" min="0" value="'+dy.actual[i]+'" oninput="setActual(\''+pj.id+'\',\''+dy.id+'\','+i+',this.value)">'+
+      h += '<td><input class="inp num-in" type="number" min="0" value="'+act[i]+'" oninput="setActual(\''+pj.id+'\',\''+dy.id+'\','+i+',this.value)">'+
         '<div class="num" id="dp-'+dy.id+'-'+i+'" style="font-size:10px;margin-top:2px;color:'+dpc+'">'+(dp===null?'—':dp+'%')+'</div></td>';
-    }
+    });
     var ov = dps.length ? Math.round(dps.reduce(function(a,b){return a+b;},0)/dps.length) : null;
     var ovc = ov===null ? 'var(--faint)' : (ov>=100?'var(--good)':(ov>=70?'var(--warn)':'var(--bad)'));
     var chk = (ov!==null && ov>=100) ? ' ✓' : '';
     h += '<td><span class="num" id="ov-'+dy.id+'" style="font-weight:700;color:'+ovc+'">'+(ov===null?'—':ov+'%')+chk+'</span></td>';
+    h += '<td>'+inputterSelect(pj.id, dy)+'</td>';
+    h += '<td><button class="btn dark sm" title="この日をチャット用にコピー" onclick="copyDay(\''+pj.id+'\',\''+dy.id+'\')">📋</button></td>';
     h += '<td><button class="btn ghost sm" onclick="toggleNote(\''+pj.id+'\',\''+dy.id+'\')">📝</button></td>';
     h += '<td><button class="btn ghost sm" onclick="removeDay(\''+pj.id+'\',\''+dy.id+'\')">×</button></td></tr>';
     if(dy.noteOpen){
-      h += '<tr><td colspan="8"><div class="note">'+
-        '<div><div class="lab">実施事項</div><textarea class="inp" oninput="setText(\''+pj.id+'\',\''+dy.id+'\',\'jisshi\',this.value)">'+esc(dy.jisshi)+'</textarea></div>'+
-        '<div><div class="lab">ネクストアクション</div><textarea class="inp" oninput="setText(\''+pj.id+'\',\''+dy.id+'\',\'na\',this.value)">'+esc(dy.na)+'</textarea></div>'+
+      var jlab = biz==='school'?'実施':'実施事項';
+      var nlab = biz==='school'?'NA':'ネクストアクション';
+      h += '<tr><td colspan="'+colspan+'"><div class="note">'+
+        '<div><div class="lab">'+jlab+'</div><textarea class="inp" oninput="setText(\''+pj.id+'\',\''+dy.id+'\',\'jisshi\',this.value)">'+esc(dy.jisshi)+'</textarea></div>'+
+        '<div><div class="lab">'+nlab+'</div><textarea class="inp" oninput="setText(\''+pj.id+'\',\''+dy.id+'\',\'na\',this.value)">'+esc(dy.na)+'</textarea></div>'+
         '</div></td></tr>';
     }
   });
-  h += '</table>';
-  h += '<button class="btn sm" style="margin-top:8px" onclick="addDay(\''+pj.id+'\')">＋ 日次を追加</button>';
+  h += '</table></div>';
+  h += '<div class="row" style="margin-top:8px;gap:10px;align-items:center">';
+  h += '<button class="btn sm" onclick="addDay(\''+pj.id+'\')">＋ 日次を追加</button>';
+  h += '<span class="sub" style="color:var(--faint)">📋＝その日の数値・施策をチャット用フォーマットでコピー</span>';
+  h += '</div>';
   h += '</div>';
   return h;
 }
@@ -571,8 +657,8 @@ function weekRangeOf(weekIso){
   return [mon, sun];
 }
 function weekActualRange(pj, mon, sun){
-  var sum=[0,0,0,0];
-  pj.days.forEach(function(d){ var dt=parseD(d.date); if(dt&&dt>=mon&&dt<=sun){ for(var i=0;i<4;i++){ sum[i]+=Number(d.actual[i])||0; } } });
+  var sum=zeros();
+  pj.days.forEach(function(d){ var dt=parseD(d.date); if(dt&&dt>=mon&&dt<=sun){ var act=padArr(d.actual); for(var i=0;i<NM;i++){ sum[i]+=Number(act[i])||0; } } });
   return sum;
 }
 function weekTextsRange(pj, mon, sun){
@@ -581,8 +667,8 @@ function weekTextsRange(pj, mon, sun){
   return { jisshi: js, na: na };
 }
 function pjWeekTargets(pj, ymRef){
-  var mt = pjTarget(pj, ymRef); var wt=[];
-  for(var i=0;i<4;i++){ wt.push(Math.round(weekTarget(mt[i], ymRef))); }
+  var mt = padArr(pjTarget(pj, ymRef)); var wt=[];
+  for(var i=0;i<NM;i++){ wt.push(Math.round(weekTarget(mt[i], ymRef))); }
   return wt;
 }
 function reviewKey(weekIso, type, id){ return weekIso+'__'+type+'__'+id; }
@@ -592,19 +678,21 @@ function buildScopeContext(weekIso, type, id){
   var ymRef = ymOf(weekIso);
   if(type==='pj'){
     var pj = findPJ(id); var div = divOfPJ(id);
+    var ms = targetsOf(div);
     var a = weekActualRange(pj, mon, sun);
     var wt = pjWeekTargets(pj, ymRef);
     var txt = weekTextsRange(pj, mon, sun);
-    return { scope:'PJ単体', week: weekLabelOf(weekIso), division: div?div.name:'', name: pj.name, metrics: METRICS, weekTarget: wt, weekActual: a, jisshi: txt.jisshi, na: txt.na };
+    return { scope:'PJ単体', week: weekLabelOf(weekIso), division: div?div.name:'', name: pj.name, metrics: ms.map(function(i){return ALLM[i].label;}), weekTarget: ms.map(function(i){return wt[i];}), weekActual: ms.map(function(i){return a[i];}), jisshi: txt.jisshi, na: txt.na };
   } else {
     var dv = findDiv(id);
-    var totT=[0,0,0,0], totA=[0,0,0,0]; var projects=[];
+    var ms2 = targetsOf(dv);
+    var totT=zeros(), totA=zeros(); var projects=[];
     activeProjects(dv).forEach(function(pj){
       var a = weekActualRange(pj, mon, sun); var wt = pjWeekTargets(pj, ymRef); var txt = weekTextsRange(pj, mon, sun);
-      for(var i=0;i<4;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; }
-      projects.push({ name: pj.name, weekTarget: wt, weekActual: a, jisshi: txt.jisshi, na: txt.na });
+      for(var i=0;i<NM;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; }
+      projects.push({ name: pj.name, weekTarget: ms2.map(function(i){return wt[i];}), weekActual: ms2.map(function(i){return a[i];}), jisshi: txt.jisshi, na: txt.na });
     });
-    return { scope:'事業部全体', week: weekLabelOf(weekIso), name: dv.name, metrics: METRICS, totalTarget: totT, totalActual: totA, projects: projects };
+    return { scope:'事業部全体', week: weekLabelOf(weekIso), name: dv.name, metrics: ms2.map(function(i){return ALLM[i].label;}), totalTarget: ms2.map(function(i){return totT[i];}), totalActual: ms2.map(function(i){return totA[i];}), projects: projects };
   }
 }
 var _gen = {};
@@ -628,9 +716,9 @@ function generateReview(weekIso, type, id){
     alert('総評の生成に失敗しました。\n'+e.message+'\n（Worker URL・APIキー・ログインを確認してください）');
   });
 }
-function sumLine(target, actual){
+function sumLine(target, actual, mlist){
   var html='<div class="revsum">';
-  for(var i=0;i<4;i++){ var p=pct(actual[i],target[i]); html+='<span>'+SHORT[i]+' <b>'+actual[i]+'</b> / '+target[i]+'（'+p+'%）</span>'; }
+  (mlist||[0,1,2,3]).forEach(function(i){ var p=pct(actual[i]||0,target[i]||0); html+='<span>'+ALLM[i].short+' <b>'+(actual[i]||0)+'</b> / '+(target[i]||0)+'（'+p+'%）</span>'; });
   return html+'</div>';
 }
 function reviewBlock(weekIso, type, id){
@@ -666,17 +754,17 @@ function renderReview(){
     var aps = activeProjects(div);
     if(aps.length===0){ return; }
     any=true;
-    var totT=[0,0,0,0], totA=[0,0,0,0];
-    aps.forEach(function(pj){ var a=weekActualRange(pj,mon,sun); var wt=pjWeekTargets(pj,ymRef); for(var i=0;i<4;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; } });
+    var totT=zeros(), totA=zeros();
+    aps.forEach(function(pj){ var a=weekActualRange(pj,mon,sun); var wt=pjWeekTargets(pj,ymRef); for(var i=0;i<NM;i++){ totT[i]+=wt[i]; totA[i]+=a[i]; } });
     html += '<div class="card" style="box-shadow:inset 3px 0 0 0 '+div.color+'">';
     html += '<div class="divhead">'+swatch(div.color)+'<span class="nm">'+esc(div.name)+'</span><span class="sub">事業部の総評（運用中PJ合算）</span></div>';
-    html += sumLine(totT, totA);
+    html += sumLine(totT, totA, targetsOf(div));
     html += reviewBlock(wk, 'div', div.id);
     aps.forEach(function(pj){
       var a=weekActualRange(pj,mon,sun); var wt=pjWeekTargets(pj,ymRef);
       html += '<div class="pjbox" style="box-shadow:inset 3px 0 0 0 '+pj.color+'; margin-top:14px">';
       html += '<div class="pjhead">'+swatch(pj.color)+'<span class="nm">'+esc(pj.name)+'</span><span class="sub">PJの総評</span></div>';
-      html += sumLine(wt, a);
+      html += sumLine(wt, a, targetsOf(div));
       html += reviewBlock(wk, 'pj', pj.id);
       html += '</div>';
     });
@@ -711,8 +799,119 @@ function renderToolbar(){
     });
     html += '<span class="chip toggle'+(state.ui.activeOnly?' on':'')+'" onclick="toggleActiveOnly()">運用中のみ</span>';
     html += '</div>';
+    html += csvBarHtml();
   }
   $('toolbar').innerHTML = html;
+}
+
+// ===== CSV出力 =====
+function opt(v,l,cur){ return '<option value="'+v+'"'+(v===cur?' selected':'')+'>'+esc(l)+'</option>'; }
+function csvCfg(){ if(!state.ui.csv){ state.ui.csv={unit:'pj',period:'all',agg:'daily'}; } return state.ui.csv; }
+function toggleCsv(){ state.ui.csvOpen=!state.ui.csvOpen; renderToolbar(); }
+function setCsv(k,v){ csvCfg()[k]=v; }
+function csvBarHtml(){
+  var c=csvCfg();
+  var h='<div class="csvbar"><button class="btn ghost sm" onclick="toggleCsv()">⬇ CSV出力</button>';
+  if(state.ui.csvOpen){
+    h+='<div class="csvpanel">';
+    h+='<label>単位<select onchange="setCsv(\'unit\',this.value)">'+opt('pj','PJごと',c.unit)+opt('div','事業部ごと（運用中PJ合計）',c.unit)+'</select></label>';
+    h+='<label>期間<select onchange="setCsv(\'period\',this.value)">'+opt('week','今週',c.period)+opt('month',monthLabel(state.ui.month),c.period)+opt('all','全期間',c.period)+'</select></label>';
+    h+='<label>集計<select onchange="setCsv(\'agg\',this.value)">'+opt('daily','日次明細',c.agg)+opt('weekly','週次集計',c.agg)+opt('monthly','月次集計',c.agg)+'</select></label>';
+    h+='<button class="btn dark sm" onclick="downloadCsv()">ダウンロード</button>';
+    h+='</div>';
+    h+='<div class="csvhint">※ すべての事業部・PJを対象に出力します（停止中PJは「PJごと」では含めて出力、「事業部ごと」では合計から除外）。Excelでそのまま開けます。</div>';
+  }
+  return h+'</div>';
+}
+function mondayIsoOf(dateStr){ var d=parseD(dateStr); var day=d.getDay(); var diff=(day===0?-6:1-day); var m=new Date(d); m.setDate(d.getDate()+diff); return m.getFullYear()+'-'+pad2(m.getMonth()+1)+'-'+pad2(m.getDate()); }
+function addDaysIso(iso,n){ var d=parseD(iso); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function csvCell(x){ var s=(x==null?'':String(x)); if(/[",\n]/.test(s)){ s='"'+s.replace(/"/g,'""')+'"'; } return s; }
+function bizMetrics(bt){ return (BIZ[bt]||BIZ.ad).metrics; }
+function bizTargets(bt){ return (BIZ[bt]||BIZ.ad).targets; }
+function buildCsv(unit, period, agg){
+  var from=null, to=null, plabel='全期間';
+  if(period==='week'){ var wr=weekRangeNow(); from=wr[0]; to=wr[1]; plabel='今週'; }
+  else if(period==='month'){ var ym=state.ui.month; from=parseD(ym+'-01'); var di=daysInMonth(ym); to=parseD(ym+'-'+pad2(di)); to.setHours(23,59,59,999); plabel=monthLabel(ym); }
+  var recs=[];
+  state.divisions.forEach(function(div){
+    var bt = div.bizType||'ad';
+    div.projects.forEach(function(pj){
+      pj.days.forEach(function(d){
+        if(!d.date) return; var dt=parseD(d.date); if(!dt) return;
+        if(from && dt<from) return; if(to && dt>to) return;
+        var ymv=ymOf(d.date); var tg=padArr(pjTarget(pj, ymv)); var act=padArr(d.actual);
+        var dtar=[]; for(var i=0;i<NM;i++){ dtar.push(dailyTarget(tg[i], ymv)); }
+        recs.push({divId:div.id, divName:div.name, bizType:bt, pjId:pj.id, pjName:pj.name, status:pj.status, date:d.date, actual:act, dtar:dtar, jisshi:(d.jisshi||''), na:(d.na||''), by:inputterName(d.by)});
+      });
+    });
+  });
+  var map={}, order=[];
+  recs.forEach(function(r){
+    if(unit==='div' && r.status!=='運用中') return;
+    var bkey, meta;
+    if(agg==='daily'){ bkey=r.date; meta={date:r.date}; }
+    else if(agg==='weekly'){ var mk=mondayIsoOf(r.date); bkey=mk; meta={start:mk, end:addDaysIso(mk,6)}; }
+    else { bkey=ymOf(r.date); meta={ym:bkey}; }
+    var gkey = unit==='pj' ? (r.divId+'|'+r.pjId+'|'+bkey) : (r.divId+'|'+bkey);
+    if(!map[gkey]){ map[gkey]={divName:r.divName, bizType:r.bizType, pjName:r.pjName, status:r.status, meta:meta, actual:zeros(), dtar:zeros(), mj:[], mn:[], by:{}, sort:r.divName+'\u0001'+(unit==='pj'?r.pjName:'')+'\u0001'+bkey}; order.push(gkey); }
+    var m=map[gkey];
+    for(var i=0;i<NM;i++){ m.actual[i]+=Number(r.actual[i])||0; m.dtar[i]+=r.dtar[i]; }
+    if(r.jisshi){ m.mj.push(r.date.slice(5)+' '+r.jisshi); }
+    if(r.na){ m.mn.push(r.date.slice(5)+' '+r.na); }
+    if(r.by){ m.by[r.by]=1; }
+  });
+  var rows = order.map(function(k){ return map[k]; });
+  rows.sort(function(a,b){ return a.sort<b.sort?-1:(a.sort>b.sort?1:0); });
+  var head=[];
+  if(unit==='pj'){ head.push('事業部','PJ','事業タイプ','状態'); } else { head.push('事業部','事業タイプ'); }
+  if(agg==='daily'){ head.push('日付'); } else if(agg==='weekly'){ head.push('週開始','週終了'); } else { head.push('月'); }
+  if(agg==='daily'){
+    for(var hi=0;hi<NM;hi++){ head.push(ALLM[hi].short); }
+    if(unit==='pj'){ head.push('入力者','実施事項','ネクストアクション'); }
+  } else {
+    for(var hj=0;hj<NM;hj++){ head.push(ALLM[hj].short+'実績', ALLM[hj].short+'目標'); }
+    head.push('総達成率%');
+  }
+  var lines=[ head.map(csvCell).join(',') ];
+  rows.forEach(function(m){
+    var bt=m.bizType||'ad';
+    var mset=bizMetrics(bt), tset=bizTargets(bt);
+    function inM(i){ return mset.indexOf(i)>=0; }
+    function inT(i){ return tset.indexOf(i)>=0; }
+    var c=[];
+    if(unit==='pj'){ c.push(m.divName, m.pjName, (BIZ[bt]||BIZ.ad).label, m.status); } else { c.push(m.divName, (BIZ[bt]||BIZ.ad).label); }
+    if(agg==='daily'){ c.push(m.meta.date); } else if(agg==='weekly'){ c.push(m.meta.start, m.meta.end); } else { c.push(m.meta.ym); }
+    if(agg==='daily'){
+      for(var i=0;i<NM;i++){ c.push(inM(i)? m.actual[i] : ''); }
+      if(unit==='pj'){ c.push(Object.keys(m.by).join('・'), m.mj.join(' / '), m.mn.join(' / ')); }
+    } else {
+      var ta=0,tt=0;
+      for(var j=0;j<NM;j++){
+        var aV = inM(j)? m.actual[j] : '';
+        var tV = inT(j)? Math.round(m.dtar[j]) : '';
+        c.push(aV, tV);
+        if(inT(j)){ ta+=m.actual[j]; tt+=Math.round(m.dtar[j]); }
+      }
+      c.push(tt>0?Math.round(ta/tt*100):0);
+    }
+    lines.push(c.map(csvCell).join(','));
+  });
+  return { csv: lines.join('\r\n'), plabel: plabel, n: rows.length };
+}
+
+function downloadCsv(){
+  var c=csvCfg();
+  var r=buildCsv(c.unit, c.period, c.agg);
+  if(r.n===0){ alert('該当する期間・対象のデータがありません。'); return; }
+  var unitL = c.unit==='pj'?'PJ別':'事業部別';
+  var aggL = c.agg==='daily'?'日次':(c.agg==='weekly'?'週次':'月次');
+  var pL = r.plabel.replace(/[\\\/:*?"<>|]/g,'');
+  var fname = 'IS日報_'+unitL+'_'+aggL+'_'+pL+'_'+todayISO()+'.csv';
+  var blob = new Blob(['\ufeff'+r.csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download=fname; document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
 }
 
 // ===== 全体描画 =====
@@ -751,14 +950,14 @@ function setTarget(pid, mi, v){
   var p = findPJ(pid);
   if(!p) return;
   var ym = state.ui.month;
-  if(!p.monthlyTargets[ym]){ p.monthlyTargets[ym] = [0,0,0,0]; }
+  if(!p.monthlyTargets[ym]){ p.monthlyTargets[ym] = zeros(); } else { p.monthlyTargets[ym] = padArr(p.monthlyTargets[ym]); }
   p.monthlyTargets[ym][mi] = Number(v)||0;
   save();
 }
 
 function addDay(pid){
   var p = findPJ(pid);
-  if(p){ p.days.push({id:uid(), date:todayISO(), actual:[0,0,0,0], jisshi:'', na:'', noteOpen:false}); renderInput(); save(); }
+  if(p){ p.days.push({id:uid(), date:todayISO(), actual:zeros(), jisshi:'', na:'', noteOpen:false, by:''}); renderInput(); save(); }
 }
 function removeDay(pid, did){
   var p = findPJ(pid);
@@ -768,19 +967,21 @@ function setActual(pid, did, mi, v){
   var p = findPJ(pid);
   if(!p) return;
   var dy = p.days.find(function(d){return d.id===did;});
-  if(dy){ dy.actual[mi] = Number(v)||0; updateDayPct(pid, did); save(); }
+  if(dy){ dy.actual = padArr(dy.actual); dy.actual[mi] = Number(v)||0; updateDayPct(pid, did); save(); }
 }
 function updateDayPct(pid, did){
   var p = findPJ(pid);
   if(!p) return;
   var dy = p.days.find(function(d){return d.id===did;});
   if(!dy) return;
+  var div = divOfPJ(pid);
   var ym = state.ui.month;
-  var tg = pjTarget(p, ym);
+  var tg = padArr(pjTarget(p, ym));
+  var act = padArr(dy.actual);
   var dps = [];
-  for(var i=0;i<4;i++){
+  targetsOf(div).forEach(function(i){
     var d1 = dailyTarget(tg[i], ym);
-    var av = Number(dy.actual[i])||0;
+    var av = Number(act[i])||0;
     var dp = d1>0 ? Math.round(av/d1*100) : null;
     if(dp!==null){ dps.push(dp); }
     var el = $('dp-'+did+'-'+i);
@@ -788,7 +989,7 @@ function updateDayPct(pid, did){
       el.textContent = (dp===null ? '—' : dp+'%');
       el.style.color = (dp===null ? 'var(--faint)' : (dp>=100?'var(--good)':(dp>=70?'var(--warn)':'var(--bad)')));
     }
-  }
+  });
   var ov = dps.length ? Math.round(dps.reduce(function(a,b){return a+b;},0)/dps.length) : null;
   var oel = $('ov-'+did);
   if(oel){
@@ -820,6 +1021,102 @@ function resetAll(){
     state.divisions = []; state.reviews = {};
     render(); save();
   }
+}
+
+// ===== 事業タイプ / 入力者マスタ / コピー =====
+function setBizType(did, v){ var d=findDiv(did); if(d){ d.bizType=v; render(); save(); } }
+
+function inputterMasterHtml(){
+  var open = !!state.ui.inpOpen;
+  var h = '<div class="imaster">';
+  h += '<div class="imbar"><button class="btn ghost sm" onclick="toggleInpMaster()">'+(open?'▼':'▶')+' 入力者マスタ（'+state.inputters.length+'名）</button></div>';
+  if(open){
+    h += '<div class="imbody">';
+    if(state.inputters.length===0){ h += '<div class="sub" style="color:var(--faint);margin-bottom:8px">まだ登録がありません。</div>'; }
+    state.inputters.forEach(function(u){
+      h += '<div class="imrow"><input class="inp" value="'+esc(u.name)+'" oninput="renameInputter(\''+u.id+'\',this.value)"><button class="btn ghost sm" onclick="removeInputter(\''+u.id+'\')">削除</button></div>';
+    });
+    h += '<button class="btn sm" onclick="addInputter()">＋ 入力者を追加</button>';
+    h += '<div class="sub" style="color:var(--faint);margin-top:8px">ここで登録した人を、各日次の「入力者」から選べます。</div>';
+    h += '</div>';
+  }
+  return h+'</div>';
+}
+function toggleInpMaster(){ state.ui.inpOpen = !state.ui.inpOpen; renderInput(); }
+function addInputter(){ state.inputters.push({id:uid(), name:'新規メンバー'}); renderInput(); save(); }
+function removeInputter(id){ state.inputters = state.inputters.filter(function(u){return u.id!==id;}); renderInput(); save(); }
+function renameInputter(id, v){ var u=state.inputters.find(function(x){return x.id===id;}); if(u){ u.name=v; save(); } }
+function inputterSelect(pid, dy){
+  var h = '<select class="inp ismall" onchange="setDayBy(\''+pid+'\',\''+dy.id+'\',this.value)">';
+  h += '<option value="">—</option>';
+  state.inputters.forEach(function(u){
+    h += '<option value="'+u.id+'"'+(dy.by===u.id?' selected':'')+'>'+esc(u.name)+'</option>';
+  });
+  return h+'</select>';
+}
+function inputterName(id){ var u=(state.inputters||[]).find(function(x){return x.id===id;}); return u?u.name:''; }
+function setDayBy(pid, did, v){ var p=findPJ(pid); if(!p) return; var dy=p.days.find(function(d){return d.id===did;}); if(dy){ dy.by=v; save(); } }
+
+function cumToDate(pj, mi, dateStr){
+  var ym = ymOf(dateStr); var sum=0;
+  pj.days.forEach(function(d){ if(ymOf(d.date)===ym && d.date<=dateStr){ sum += Number(padArr(d.actual)[mi])||0; } });
+  return sum;
+}
+function fmtDateSlash(dateStr){ var p=dateStr.split('-'); return p[0]+'/'+p[1]+'/'+p[2]; }
+function buildCopyText(div, pj, dy){
+  var ym = ymOf(dy.date);
+  var t = padArr(pjTarget(pj, ym));
+  var act = padArr(dy.actual);
+  function dT(i){ return Math.round(dailyTarget(t[i], ym)); }
+  function block(i){
+    return '■'+ALLM[i].label+'\n本日：'+(Number(act[i])||0)+'（目標：'+dT(i)+'）\n累計：'+cumToDate(pj,i,dy.date)+'（目標：'+t[i]+'）';
+  }
+  var biz = div.bizType||'ad';
+  var lines = [ fmtDateSlash(dy.date), pj.name ];
+  if(biz==='school'){
+    lines.push(block(2));
+    lines.push(block(3));
+    lines.push('■面談参加予定者数\n説明会：'+(Number(act[4])||0));
+    lines.push('■前日応募者数\n'+(Number(act[5])||0)+'人');
+    lines.push('');
+    lines.push('■実施\n'+(dy.jisshi||''));
+    lines.push('');
+    lines.push('■NA\n'+(dy.na||''));
+  } else {
+    lines.push(block(0));
+    lines.push(block(1));
+    lines.push(block(2));
+    lines.push(block(3));
+    lines.push('前日応募数：'+(Number(act[5])||0)+'（目標：'+dT(5)+'）');
+    lines.push('');
+    lines.push('〇実施事項\n'+(dy.jisshi||''));
+    lines.push('');
+    lines.push('〇NA（ネクストアクション）\n'+(dy.na||''));
+  }
+  return lines.join('\n');
+}
+function copyDay(pid, did){
+  var p = findPJ(pid); if(!p) return;
+  var div = divOfPJ(pid);
+  var dy = p.days.find(function(d){return d.id===did;});
+  if(!dy) return;
+  copyText(buildCopyText(div, p, dy));
+}
+function copyText(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ showToast('コピーしました'); }, function(){ fallbackCopy(text); });
+  } else { fallbackCopy(text); }
+}
+function fallbackCopy(text){
+  var ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select();
+  try{ document.execCommand('copy'); showToast('コピーしました'); }catch(e){ showToast('コピーできませんでした'); }
+  document.body.removeChild(ta);
+}
+var _toastT=null;
+function showToast(msg){
+  var el=$('toast'); if(!el){ el=document.createElement('div'); el.id='toast'; el.className='toast'; document.body.appendChild(el); }
+  el.textContent=msg; el.classList.add('on');
+  clearTimeout(_toastT); _toastT=setTimeout(function(){ el.classList.remove('on'); }, 1600);
 }
 
 // ===== ログイン・初期化 =====
